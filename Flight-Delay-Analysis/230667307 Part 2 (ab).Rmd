@@ -1,0 +1,222 @@
+---
+title: "Part 2(a&b)"
+author: "Chin Joey"
+date: "2025-02-22"
+output: html_document
+---
+Part 2(a)
+1.Identify columns with missing values
+2.Remove rows with missing key values
+3.Adjust delays, categorize flight times and extract days of the week
+4.Calculate average delays by time of day and day of the week
+5.Plot bar charts to show the best times and best days to fly with the lowest delays
+
+Load libraries
+```{r}
+library(tidyr)
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+
+```
+
+Load data and import it into data frame
+```{r}
+airports_df <- read.csv("airports.csv", header = TRUE)
+carriers_df <- read.csv("carriers.csv", header = TRUE)
+planes_df <- read.csv ("plane-data.csv", header = TRUE)
+ontime_df <- data.frame()
+for (year in 2004:2008) {
+  file_path <- paste0(year, ".csv/", year, ".csv")
+  yearly_data <- read.csv(file_path, header = TRUE)
+  ontime_df <- rbind(ontime_df, yearly_data)
+}
+```
+
+Check which col has NA
+```{r}
+
+names(which(colSums(is.na(ontime_df)) > 0))
+
+
+```
+
+Data Cleaning and Adjustment
+1.Remove NA values for accurate analysis
+2.Consider minor delays (<15 mins) as no delay
+3.Create total delay, time category and weekday features
+4.Drop invalid time categories
+```{r}
+
+part_a_df <- ontime_df %>%
+  filter(!is.na(DepTime) & !is.na(DepDelay) & !is.na(ArrDelay)) %>% 
+  mutate(
+    # Replace delays < 15 min with 0
+    DepDelay = ifelse(DepDelay < 15, 0, DepDelay),
+    ArrDelay = ifelse(ArrDelay < 15, 0, ArrDelay),
+    
+    # Calculate total delay after adjustments
+    TotDelay = DepDelay + ArrDelay,
+    Hour = floor(DepTime / 100),  # Extract hour from DepTime
+    TimeCategory = case_when(
+      Hour >= 0 & Hour < 6  ~ "Early Morning",
+      Hour >= 6 & Hour < 12 ~ "Morning",
+      Hour >= 12 & Hour < 18 ~ "Afternoon",
+      Hour >= 18 & Hour < 24 ~ "Night"  
+    ),
+    
+    # Convert date columns to actual date format
+    Date = as.Date(with(., paste(DayofMonth, Month, Year, sep="-")), format="%d-%m-%Y"),
+    
+    # Extract day of the week
+    DayOfWeek = wday(Date, label = TRUE)
+  ) %>%
+  
+  filter(!is.na(TimeCategory))
+  
+```
+
+Analyze Best Flight Times
+1.Group data by time category
+2.Calculate and sort average delays to find the best times
+```{r}
+best_flight_times <- part_a_df %>%
+                     group_by(TimeCategory) %>%
+                     summarise(AvgDelay = mean(TotDelay)) %>%
+                     arrange(AvgDelay)
+
+# Best flight times table
+print(best_flight_times)
+
+
+```
+
+Analyze Best Flight Days
+1.Group data by weekday
+2.Calculate and sort average delays to find the best days
+```{r}
+
+best_flight_days <- part_a_df %>%
+                    group_by(DayOfWeek) %>%
+                    summarise(AvgDelay = mean(TotDelay)) %>%
+                    arrange(AvgDelay)
+
+# Best flight days table
+print(best_flight_days)
+
+```
+
+Visualize optimal flight times with the lowest delays
+```{r}
+
+ggplot(best_flight_times, aes(x = reorder(TimeCategory, AvgDelay), y = AvgDelay, fill = AvgDelay)) +
+  geom_col(show.legend = FALSE) +
+  scale_fill_gradient(low = "lightblue", high = "darkblue") +
+  labs(title = "Best Time of Day to Fly (Lowest Delays)", x = "Time of Day", y = "Avg Total Delay (mins)") +
+  theme_minimal()
+
+```
+
+Visualize optimal flight days with the lowest delays
+```{r}
+
+ggplot(best_flight_days, aes(x = reorder(DayOfWeek, AvgDelay), y = AvgDelay, fill = AvgDelay)) +
+  geom_col(show.legend = FALSE) +
+  scale_fill_gradient(low = "lightblue", high = "darkblue") +
+  labs(title = "Best Days to Fly (Lowest Delays)", x = "Day of the Week", y = "Avg Total Delay (mins)") +
+  theme_minimal()
+
+```
+
+Part 2 (b) 
+1.Filter out cancelled and diverted flights to focus on delays
+2.Calculate plane age by comparing flight year to manufacturing year
+3.Adjust delays by considering minor delays (<15 mins) as zero
+4.Aggregate data to compute average delays per plane age
+5.Visualize results with a line plot (age vs. average delay)
+6.Analyze trend to determine if older planes experience more delays
+
+Load libraries
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+```
+
+Load data and import it into data frame
+```{r}
+airports_df <- read.csv("airports.csv", header = TRUE)
+carriers_df <- read.csv("carriers.csv", header = TRUE)
+planes_df <- read.csv ("plane-data.csv", header = TRUE)
+ontime_df <- data.frame()
+for (year in 2004:2008) {
+  file_path <- paste0(year, ".csv/", year, ".csv")
+  yearly_data <- read.csv(file_path, header = TRUE)
+  ontime_df <- rbind(ontime_df, yearly_data)
+}
+```
+
+Remove cancelled and diverted flights, select relevant attributes
+1.Exclude cancelled and diverted flights (set to NA and drop)
+2.Retain only columns needed for analysis (Year, TailNum, delays)
+```{r}
+part_b_df <- ontime_df %>%
+  mutate(
+    Cancelled = ifelse(Cancelled == 1, NA, Cancelled),
+    Diverted = ifelse(Diverted == 1, NA, Diverted)
+  ) %>%
+  drop_na(Cancelled, Diverted) %>% 
+  select(Year, TailNum, ArrDelay, DepDelay)
+
+
+```
+
+Merge data and calculate age 
+1.Merge flight data with plane manufacturing years
+2.Calculate plane age and filter NA and unrealistic values
+```{r}
+part_b_merged_df <- part_b_df %>%
+  left_join(planes_df %>% select(TailNum = tailnum, plane_year = year), by = "TailNum")
+
+part_b_merged_df <- part_b_merged_df %>%
+  mutate(
+    Year = as.integer(Year),
+    plane_year = as.integer(gsub("[^0-9]", "", plane_year)),  # Keeps only digits
+    Age = Year - plane_year
+  ) %>%
+  filter(!is.na(plane_year), Age >= 0 & Age <= 100)
+
+```
+
+Adjust Delays and compute total delay
+1.Ignore minor delays (<15 mins)
+2.Create a total delay 
+```{r}
+part_b_merged_df <- part_b_merged_df %>%
+  mutate(
+    DepDelay = ifelse(DepDelay < 15, 0, DepDelay), # Replace DepDelay and ArrDelay < 15 with 0
+    ArrDelay = ifelse(ArrDelay < 15, 0, ArrDelay),
+    totdelay = ArrDelay + DepDelay
+  )
+
+```
+
+Aggregate: Compute average total delay by aircraft age
+```{r}
+part_b_graph_df <- part_b_merged_df %>%
+  group_by(Age) %>%
+  summarise(avg_totdelay = mean(totdelay, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+Plot the relationship between plane age and average delays
+```{r}
+ggplot(part_b_graph_df, aes(x = Age, y = avg_totdelay)) +
+  geom_line(color = "black") +
+  labs(title = "Average Delay vs. Aircraft Age",
+       x = "Age (Years in Use)",
+       y = "Average Delay (minutes)") +
+  theme_minimal()
+``` 
+

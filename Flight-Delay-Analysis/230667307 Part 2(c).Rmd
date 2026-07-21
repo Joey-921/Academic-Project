@@ -1,0 +1,158 @@
+---
+title: "Part 2(c)"
+author: "Chin Joey"
+date: "2025-04-03"
+output: html_document
+---
+
+Part 2(c)
+1.Exclude cancelled flights
+2.Select key features 
+3.Convert variables to factors for modeling
+4.Split data into training (40%) and testing (60%) sets
+5.Create a logistic regression task for flight diversion prediction
+6.Train the model and evaluate its performance
+7.Analyze coefficients yearly to see feature impacts over time
+8.Visualize results with a trend plot of coefficients
+
+Load libraries
+```{r}
+library(data.table)
+library(mlr3)
+library(mlr3learners)
+library(mlr3pipelines)
+library(ggplot2)
+library(scales)
+
+```
+
+Load data and import it into data frame
+```{r}
+airports_df <- read.csv("airports.csv", header = TRUE)
+carriers_df <- read.csv("carriers.csv", header = TRUE)
+planes_df <- read.csv ("plane-data.csv", header = TRUE)
+ontime_df <- data.frame()
+for (year in 2004:2008) {
+  file_path <- paste0(year, ".csv/", year, ".csv")
+  yearly_data <- read.csv(file_path, header = TRUE)
+  ontime_df <- rbind(ontime_df, yearly_data)
+}
+```
+
+Convert data to a data.table and exclude cancelled flights
+```{r}
+# Convert ontime_df to a data.table
+setDT(ontime_df) 
+
+# Replace cancelled flights with NA and remove them
+ontime_df[, Cancelled := fifelse(Cancelled == 1, NA, Cancelled)]
+ontime_df <- na.omit(ontime_df, cols = "Cancelled")
+
+```
+
+Feature Selection
+1.Keep needed features for the logistic regression model
+2.'Year' for visualization
+```{r}
+part_c_df <- ontime_df[, .(Year, DayOfWeek, CRSDepTime, CRSArrTime, UniqueCarrier, Distance, Diverted)]
+
+
+```
+
+Converted categorical variables to factors for modeling
+```{r}
+part_c_df[, Year := as.factor(Year)]  # Keep Year as factor for plotting
+part_c_df[, DayOfWeek := as.factor(DayOfWeek)]
+part_c_df[, UniqueCarrier := as.factor(UniqueCarrier)]
+part_c_df[, Diverted := as.factor(Diverted)]  # Target variable
+
+```
+
+Split data into training (40%) and testing (60%) sets
+```{r}
+set.seed(123)
+n <- nrow(part_c_df) # Get total number of rows
+train_set <- sample(n, round(0.4 * n))
+test_set <- setdiff(1:n, train_set)
+
+```
+
+Set up a classification task with selected features
+1.Define classification task
+2.Select relevant features for the model (excluding the target variable)
+3.Define classification error as the performance measure
+4.Print task summary
+```{r}
+task <- TaskClassif$new("diversion", backend = part_c_df, target = "Diverted")
+task$select(c("DayOfWeek", "CRSDepTime", "CRSArrTime", "UniqueCarrier", "Distance"))
+measure <- msr("classif.ce")
+task
+
+```
+Logistic regression model with preprocessing
+1.Define logistic regression learner
+2.Create a preprocessing pipeline
+3.Combines preprocessing and model into a pipeline
+```{r}
+learner_lr <- lrn("classif.log_reg")
+gc_lr <- po("imputemean") %>>% learner_lr
+glrn_lr <- GraphLearner$new(gc_lr)
+
+```
+
+Trains the model on the training set
+```{r}
+# Train the model on the training set
+glrn_lr$train(task, row_ids = train_set)
+
+```
+
+Evaluate the model’s performance
+1.Make predictions on the test set
+2.Compute classification error
+```{r}
+predictions <- glrn_lr$predict(task, row_ids = test_set)
+predictions$score(measure)
+
+```
+Yearly Coefficient Analysis
+1.Create empty list to store coefficients
+2.Loop through each year 
+3.Fit logistic regression for that year's data
+4.Extract coefficients for key flight features
+5.Filter out individual categories, keeping only main effects
+6.Combine all years' results into one data frame
+```{r}
+coef_list <- list()
+
+for (yr in unique(part_c_df$Year)) {
+  
+  year_data <- part_c_df[Year == yr] # Subset data for the specific year
+  
+  model <- glm(Diverted ~ CRSDepTime + CRSArrTime + Distance + UniqueCarrier + DayOfWeek,
+               data = year_data, family = binomial)
+  
+  coef_dt <- data.table(Year = yr, Term = names(coef(model)), Coefficient = coef(model))
+  
+  coef_dt <- coef_dt[Term %in% c("CRSDepTime", "CRSArrTime", "Distance", "UniqueCarrier", "DayOfWeek")]
+
+  coef_list[[as.character(yr)]] <- coef_dt # Store results
+}
+
+coef_data <- rbindlist(coef_list)
+
+```
+
+Plot how feature importance (coefficients) changes across years 
+```{r}
+ggplot(coef_data, aes(x = Year, y = Coefficient, color = Term, group = Term)) +
+  geom_line() + 
+  geom_point() +
+  labs(title = "Logistic Regression Coefficients Over Time",
+       x = "Year",
+       y = "Coefficient",
+       color = "Feature") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(labels = label_number(accuracy = 0.001))  # Format y-axis with decimals
+```
