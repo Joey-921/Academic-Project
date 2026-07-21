@@ -1,1 +1,2 @@
-
+## Market Research Proposal
+Designed a market research proposal by developing research objectives, questionnaire design, sampling methodology and statistical analysis techniques, including Regression Analysis, Factor Analysis, ANOVA and Cluster Analysis. Proposed a research framework to evaluate customer preferences, guest satisfaction, travel behaviour and loyalty programs to support business decision-making.
